@@ -11,6 +11,7 @@ fn config() -> Config {
         wizard_dir: root.join("crates/wizard/dist-does-not-exist"),
         hetzner_api: "http://127.0.0.1:9".into(),
         allow_demo: true,
+        trust_proxy: false,
     }
 }
 
@@ -218,4 +219,69 @@ async fn a_failed_hetzner_call_marks_the_job_failed() {
 #[test]
 fn year_is_plausible() {
     assert!((2025..2100).contains(&year()));
+}
+
+#[tokio::test]
+async fn verify_api_validates_and_rate_limits() {
+    let app = app(config());
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/api/verify",
+        Some(serde_json::json!({ "domain": "example.eu", "ipv4": "10.0.0.5" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.contains("not a public address"), "{body}");
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/api/verify",
+        Some(serde_json::json!({ "nope": 1 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // 12 per minute per client; two used above.
+    for _ in 0..10 {
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/api/verify",
+            Some(serde_json::json!({ "ipv4": "127.0.0.1" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/api/verify",
+        Some(serde_json::json!({ "ipv4": "127.0.0.1" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+}
+
+#[tokio::test]
+async fn verify_api_demo_mode() {
+    let app = app(config());
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/api/verify",
+        Some(serde_json::json!({ "domain": "ready.example.eu", "ipv4": "203.0.113.10", "mail": true, "dkim_selector": "202611e" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let report: types::VerifyReport = serde_json::from_str(&body).unwrap();
+    assert!(report.ready, "{report:#?}");
+    let (_, body) = call(
+        &app,
+        "POST",
+        "/api/verify",
+        Some(serde_json::json!({ "domain": "cloud.example.eu", "ipv4": "203.0.113.10", "mail": true })),
+    )
+    .await;
+    let report: types::VerifyReport = serde_json::from_str(&body).unwrap();
+    assert!(!report.ready);
 }

@@ -5,6 +5,7 @@ use leptos::prelude::*;
 use site::{SiteFooter, SiteHeader};
 
 mod deploy;
+mod verify;
 
 #[component]
 pub fn App() -> impl IntoView {

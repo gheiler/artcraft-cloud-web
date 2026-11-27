@@ -18,10 +18,13 @@ async fn main() {
         .await
         .unwrap_or_else(|e| panic!("cannot bind {addr}: {e}"));
     tracing::info!("listening on http://{}", listener.local_addr().unwrap());
-    axum::serve(listener, server::app(config))
-        .with_graceful_shutdown(shutdown())
-        .await
-        .unwrap();
+    axum::serve(
+        listener,
+        server::app(config).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown())
+    .await
+    .unwrap();
 }
 
 /// Ctrl-C, or SIGTERM from `docker stop` / Kubernetes.

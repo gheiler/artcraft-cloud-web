@@ -423,6 +423,98 @@ pub struct JobStatus {
     pub admin_password: Option<String>,
 }
 
+/// `POST /api/verify`: what to check. The server only ever talks to `ipv4`/`ipv6` (never to
+/// whatever the domain resolves to), and only when they are public addresses.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct VerifyRequest {
+    /// `cloud.example.eu`; empty or `skip_domain` -> `<ip>.sslip.io`.
+    #[serde(default)]
+    pub domain: String,
+    #[serde(default)]
+    pub skip_domain: bool,
+    /// The server's public IPv4 address, from the host's panel or the one-click job.
+    pub ipv4: String,
+    /// Optional: the server's IPv6 address, to check an AAAA record against.
+    #[serde(default)]
+    pub ipv6: String,
+    /// Check MX, SPF, DMARC and DKIM too.
+    #[serde(default)]
+    pub mail: bool,
+    /// The DKIM selector Stalwart shows (e.g. `202611e`); empty skips the DKIM check.
+    #[serde(default)]
+    pub dkim_selector: String,
+}
+
+/// How one check came out.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckState {
+    /// Matches what we expect.
+    Ok,
+    /// Works, but worth a look.
+    Warn,
+    /// Wrong or missing; `fix` says what to change.
+    Fail,
+    /// Not there yet but expected to come (install running, certificate pending, DNS cache).
+    Wait,
+    /// Not checked (e.g. mail checks without a DKIM selector, or in sslip.io mode).
+    Skip,
+}
+
+impl CheckState {
+    pub fn label(self) -> &'static str {
+        match self {
+            CheckState::Ok => "OK",
+            CheckState::Warn => "Check",
+            CheckState::Fail => "Fix",
+            CheckState::Wait => "Waiting",
+            CheckState::Skip => "Skipped",
+        }
+    }
+}
+
+/// One line of the verify report.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Check {
+    /// Stable id: `a`, `aaaa`, `mail_a`, `mx`, `spf`, `dmarc`, `dkim`, `mail`, `https`.
+    pub id: String,
+    /// e.g. "A record for cloud.example.eu".
+    pub label: String,
+    pub state: CheckState,
+    /// What we found, e.g. "203.0.113.10" or "no record".
+    pub found: String,
+    /// What we expect, when there is a single right answer.
+    #[serde(default)]
+    pub expected: Option<String>,
+    /// What to do about it, for `warn`, `fail` and `wait`.
+    #[serde(default)]
+    pub fix: Option<String>,
+}
+
+/// Reply from `/api/verify`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct VerifyReport {
+    /// The name that was checked (the domain, or `<ip>.sslip.io`).
+    pub host: String,
+    /// `https://<host>`.
+    pub url: String,
+    pub checks: Vec<Check>,
+    /// True when nothing is `fail` or `wait`: the cloud answers and DNS is right.
+    pub ready: bool,
+}
+
+impl VerifyReport {
+    pub fn count(&self, state: CheckState) -> usize {
+        self.checks.iter().filter(|c| c.state == state).count()
+    }
+
+    pub fn https_ok(&self) -> bool {
+        self.checks
+            .iter()
+            .any(|c| c.id == "https" && c.state == CheckState::Ok)
+    }
+}
+
 /// DNS records the wizard hands the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DnsRecord {
@@ -489,9 +581,9 @@ pub fn dns_records(domain: &str, mail: bool, ip: &str) -> Vec<DnsRecord> {
         });
         rows.push(DnsRecord {
             kind: "TXT",
-            name: "stalwart._domainkey".to_string(),
-            value: "v=DKIM1; k=ed25519; p=<printed after first boot>".to_string(),
-            note: "DKIM — the wizard prints the real key once Stalwart is up",
+            name: "<selector>._domainkey".to_string(),
+            value: "v=DKIM1; k=rsa; p=<key from Stalwart>".to_string(),
+            note: "DKIM — copy the selector and key from the domain's DNS records in Stalwart's admin after the first start",
         });
     }
 

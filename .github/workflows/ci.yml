@@ -22,6 +22,17 @@ jobs:
           targets: wasm32-unknown-unknown
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: cloud-init template matches artcraft-cloud
+        # 0 = in sync, 1 = drifted (fail), 2 = not on artcraft-cloud main yet (warn only).
+        run: |
+          set +e
+          scripts/sync-cloud-init.sh --check
+          code=$?
+          if [ "$code" = 2 ]; then
+            echo "::warning::The cloud-init recipe is not on gheiler/artcraft-cloud main yet; drift check skipped."
+            exit 0
+          fi
+          exit "$code"
       - run: cargo fmt --all -- --check
       - run: cargo clippy -p server -p site -p types --all-targets --locked -- -D warnings
       - run: cargo clippy -p wizard --target wasm32-unknown-unknown --locked -- -D warnings
