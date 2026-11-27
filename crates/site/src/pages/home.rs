@@ -219,81 +219,60 @@ pub fn HomePage() -> impl IntoView {
     }
 }
 
-/// Interactive Drive-only vs Drive + Mail preview in the hero.
+/// Drive-only vs Drive + Mail preview in the hero. Static HTML: two radio buttons switch the
+/// visible body with CSS (`:has`), so the marketing pages ship no Wasm.
 #[component]
 fn ModePreview() -> impl IntoView {
-    let (mode, set_mode) = signal(DeployMode::Drive);
-
     view! {
         <div class="mode-card">
-            <div class="segments" role="tablist" aria-label="Deployment mode">
-                <button
-                    class="segment"
-                    class:on=move || mode.get() == DeployMode::Drive
-                    role="tab"
-                    aria-selected=move || (mode.get() == DeployMode::Drive).to_string()
-                    on:click=move |_| set_mode.set(DeployMode::Drive)
-                >
-                    "Drive only"
-                </button>
-                <button
-                    class="segment"
-                    class:on=move || mode.get() == DeployMode::DriveMail
-                    role="tab"
-                    aria-selected=move || (mode.get() == DeployMode::DriveMail).to_string()
-                    on:click=move |_| set_mode.set(DeployMode::DriveMail)
-                >
-                    "Drive + Mail"
-                </button>
+            <div class="segments" role="radiogroup" aria-label="Deployment mode">
+                <input class="sr-only" type="radio" name="mode-preview" id="mp-drive" checked />
+                <label class="segment" for="mp-drive">"Drive only"</label>
+                <input class="sr-only" type="radio" name="mode-preview" id="mp-mail" />
+                <label class="segment" for="mp-mail">"Drive + Mail"</label>
             </div>
-            <div class="mode-body">
-                <div class="mode-head">
-                    <div>
-                        <div class="mode-price">
-                            {move || mode.get().price_note()}
-                            <small>" to your host"</small>
-                        </div>
-                        <div class="tiny muted mt-8">
-                            {move || match mode.get() {
-                                DeployMode::Drive => "The drive and all ten Craft apps.",
-                                DeployMode::DriveMail => "Everything in Drive, plus Stalwart mail and calendar on your domain.",
-                            }}
-                        </div>
-                    </div>
-                    <span class="badge success">
-                        <span class="dot"></span>
-                        {move || mode.get().label()}
-                    </span>
+            <ModeBody mode=DeployMode::Drive />
+            <ModeBody mode=DeployMode::DriveMail />
+        </div>
+    }
+}
+
+#[component]
+fn ModeBody(mode: DeployMode) -> impl IntoView {
+    let (class, blurb, cpu, third) = match mode {
+        DeployMode::Drive => (
+            "mode-body mode-drive",
+            "The drive and all ten Craft apps.",
+            "1 vCPU",
+            "Safe ETag saves and automatic HTTPS",
+        ),
+        DeployMode::DriveMail => (
+            "mode-body mode-mail",
+            "Everything in Drive, plus Stalwart mail and calendar on your domain.",
+            "2 vCPU",
+            "MailCraft + CalendarCraft on your own domain (IMAP, SMTP, JMAP, CalDAV)",
+        ),
+    };
+    view! {
+        <div class=class>
+            <div class="mode-head">
+                <div>
+                    <div class="mode-price">{mode.price_note()} <small>" to your host"</small></div>
+                    <div class="tiny muted mt-8">{blurb}</div>
                 </div>
-                <div class="spec-row">
-                    <div class="spec">
-                        <b>{move || mode.get().ram()}</b>
-                        <span>"RAM"</span>
-                    </div>
-                    <div class="spec">
-                        <b>{move || mode.get().disk()}</b>
-                        <span>"Disk"</span>
-                    </div>
-                    <div class="spec">
-                        <b>{move || if mode.get() == DeployMode::Drive { "1 vCPU" } else { "2 vCPU" }}</b>
-                        <span>"Compute"</span>
-                    </div>
-                </div>
-                <ul class="mode-list">
-                    <li><span class="tick"><Tick /></span>"Folder-backed drive with WebDAV at " <code>"/dav/"</code></li>
-                    <li><span class="tick"><Tick /></span>"WordCraft, GridCraft, DeckCraft, PdfCraft and six more"</li>
-                    <li><span class="tick"><Tick /></span>
-                        {move || if mode.get() == DeployMode::DriveMail {
-                            "MailCraft + CalendarCraft on your own domain (IMAP, SMTP, JMAP, CalDAV)"
-                        } else {
-                            "Safe ETag saves and automatic HTTPS"
-                        }}
-                    </li>
-                </ul>
-                <a class="button primary block" href="/deploy">
-                    {move || format!("Deploy {}", mode.get().label())}
-                </a>
+                <span class="badge success"><span class="dot"></span>{mode.label()}</span>
             </div>
+            <div class="spec-row">
+                <div class="spec"><b>{mode.ram()}</b><span>"RAM"</span></div>
+                <div class="spec"><b>{mode.disk()}</b><span>"Disk"</span></div>
+                <div class="spec"><b>{cpu}</b><span>"Compute"</span></div>
+            </div>
+            <ul class="mode-list">
+                <li><span class="tick"><Tick /></span>"Folder-backed drive with WebDAV at " <code>"/dav/"</code></li>
+                <li><span class="tick"><Tick /></span>"WordCraft, GridCraft, DeckCraft, PdfCraft and six more"</li>
+                <li><span class="tick"><Tick /></span>{third}</li>
+            </ul>
+            <a class="button primary block" href="/deploy">{format!("Deploy {}", mode.label())}</a>
         </div>
     }
 }

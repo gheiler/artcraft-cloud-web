@@ -109,6 +109,14 @@ pub struct Host {
     pub url: &'static str,
 }
 
+impl Host {
+    /// True when `/api/deploy` can create the server with an API token today. The other API
+    /// hosts get the same recipe to paste until their client lands.
+    pub fn one_click(&self) -> bool {
+        self.tier == Tier::Api && self.id == "hetzner"
+    }
+}
+
 /// The v1 line-up. Hostkey is deliberately excluded (see plan.md).
 pub const HOSTS: [Host; 7] = [
     Host {
@@ -249,22 +257,124 @@ impl Registry {
     }
 }
 
-/// The wizard's form, posted to `/api/deploy`.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+/// The wizard's form, posted to `/api/deploy` (one-click) or `/api/cloud-init` (recipe only).
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DeployRequest {
     pub provider: String,
     pub mode: DeployMode,
+    /// `cloud.example.eu`. Ignored when `skip_domain` is set.
+    #[serde(default)]
     pub domain: String,
-    /// Where to send the "your server is ready" mail.
+    /// Optional: Let's Encrypt contact for certificate expiry notices.
+    #[serde(default)]
     pub email: String,
-    /// Held in memory for the duration of the task only — never persisted.
+    /// Held in memory for the duration of the task only, never persisted or logged.
     #[serde(default)]
     pub api_token: String,
     #[serde(default)]
     pub region: Option<String>,
-    /// True when the user chose to attach the domain manually later.
+    /// True when the user attaches a domain later; the server then uses `<ip>.sslip.io`.
     #[serde(default)]
     pub skip_domain: bool,
+}
+
+// Hand-written so the API token can never end up in a log line.
+impl std::fmt::Debug for DeployRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeployRequest")
+            .field("provider", &self.provider)
+            .field("mode", &self.mode)
+            .field("domain", &self.domain)
+            .field("email", &self.email)
+            .field(
+                "api_token",
+                &if self.api_token.is_empty() {
+                    "<none>"
+                } else {
+                    "<redacted>"
+                },
+            )
+            .field("region", &self.region)
+            .field("skip_domain", &self.skip_domain)
+            .finish()
+    }
+}
+
+impl DeployRequest {
+    /// The domain to configure, or `None` for the `<ip>.sslip.io` fallback.
+    pub fn effective_domain(&self) -> Option<String> {
+        let d = self
+            .domain
+            .trim()
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+        if self.skip_domain || d.is_empty() {
+            None
+        } else {
+            Some(d)
+        }
+    }
+
+    /// Checks the fields both the wizard and the server rely on. The error is user-facing.
+    pub fn validate(&self) -> Result<(), String> {
+        if host(&self.provider).is_none() {
+            return Err("Pick a host from the list.".into());
+        }
+        if let Some(d) = self.effective_domain() {
+            if !valid_domain(&d) {
+                return Err(format!(
+                    "“{d}” does not look like a domain name, e.g. cloud.example.eu."
+                ));
+            }
+        } else if !self.skip_domain {
+            return Err("Add your domain, or tick “set it up later”.".into());
+        }
+        let email = self.email.trim();
+        if !email.is_empty() && !valid_email(email) {
+            return Err("That email address does not look right.".into());
+        }
+        Ok(())
+    }
+}
+
+/// A host name with at least two labels, letters, digits and inner hyphens only.
+pub fn valid_domain(d: &str) -> bool {
+    let labels: Vec<&str> = d.split('.').collect();
+    d.len() <= 253
+        && labels.len() >= 2
+        && labels.iter().all(|l| {
+            !l.is_empty()
+                && l.len() <= 63
+                && !l.starts_with('-')
+                && !l.ends_with('-')
+                && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+        && !labels.last().unwrap().chars().all(|c| c.is_ascii_digit())
+}
+
+/// Deliberately simple: `local@domain`, no spaces or quotes, a valid domain.
+pub fn valid_email(e: &str) -> bool {
+    match e.rsplit_once('@') {
+        Some((local, domain)) => {
+            !local.is_empty()
+                && local.len() <= 64
+                && local
+                    .chars()
+                    .all(|c| c.is_ascii_graphic() && !"\"'`<>()[],;:@\\".contains(c))
+                && valid_domain(domain)
+        }
+        None => false,
+    }
+}
+
+/// `203.0.113.10` -> `203-0-113-10.sslip.io`, the name the recipe uses when no domain is set.
+pub fn sslip_domain(ipv4: &str) -> String {
+    format!("{}.sslip.io", ipv4.replace('.', "-"))
+}
+
+/// Looks a host up by id.
+pub fn host(id: &str) -> Option<&'static Host> {
+    HOSTS.iter().find(|h| h.id == id)
 }
 
 /// Reply from `/api/deploy`.
@@ -274,15 +384,32 @@ pub struct DeployAccepted {
     pub status: String,
 }
 
+/// Reply from `/api/cloud-init`: the recipe to paste into the host's panel.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct CloudInitRecipe {
+    pub yaml: String,
+    /// `https://cloud.example.eu`, or `None` when it will be `https://<ip>.sslip.io`.
+    pub url: Option<String>,
+}
+
 /// Reply from `/api/deploy/:id`.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct JobStatus {
     pub job_id: String,
+    /// queued, creating, booting, installing, done, failed, unknown
     pub status: String,
     #[serde(default)]
     pub detail: Option<String>,
     #[serde(default)]
     pub ip: Option<String>,
+    /// `https://...` once the server has an address.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// The generated admin login; only kept in the server's memory while the job lives.
+    #[serde(default)]
+    pub admin_user: Option<String>,
+    #[serde(default)]
+    pub admin_password: Option<String>,
 }
 
 /// DNS records the wizard hands the user.
@@ -298,8 +425,16 @@ pub struct DnsRecord {
 pub fn dns_records(domain: &str, mail: bool, ip: &str) -> Vec<DnsRecord> {
     let mut rows = vec![DnsRecord {
         kind: "A",
-        name: "@".to_string(),
-        value: if ip.is_empty() { "<server IPv4>".to_string() } else { ip.to_string() },
+        name: if domain.is_empty() {
+            "<domain>".to_string()
+        } else {
+            domain.to_string()
+        },
+        value: if ip.is_empty() {
+            "<server IPv4>".to_string()
+        } else {
+            ip.to_string()
+        },
         note: "Points the drive at your server",
     }];
 
@@ -312,7 +447,11 @@ pub fn dns_records(domain: &str, mail: bool, ip: &str) -> Vec<DnsRecord> {
         rows.push(DnsRecord {
             kind: "A",
             name: mail_host.clone(),
-            value: if ip.is_empty() { "<server IPv4>".to_string() } else { ip.to_string() },
+            value: if ip.is_empty() {
+                "<server IPv4>".to_string()
+            } else {
+                ip.to_string()
+            },
             note: "Mail + JMAP host",
         });
         rows.push(DnsRecord {
@@ -378,10 +517,52 @@ mod tests {
 
     #[test]
     fn registry_lists_ten_apps() {
-        let reg = Registry::parse(include_str!("../../wizard/assets/apps.json")).unwrap();
+        let reg = Registry::parse(include_str!("../../site/static/assets/apps.json")).unwrap();
         assert_eq!(reg.apps.len(), 10);
         assert!(reg.apps.iter().any(|a| a.id == "wordcraft"));
-        assert!(reg.apps.iter().all(|a| a.icon_path().starts_with("/assets/icons/")));
+        assert!(reg
+            .apps
+            .iter()
+            .all(|a| a.icon_path().starts_with("/assets/icons/")));
+    }
+
+    #[test]
+    fn domains_and_emails() {
+        assert!(valid_domain("cloud.example.eu"));
+        assert!(valid_domain("xn--bcher-kva.example"));
+        assert!(!valid_domain("example"));
+        assert!(!valid_domain("-a.example.eu"));
+        assert!(!valid_domain("a..eu"));
+        assert!(!valid_domain("cloud.example.eu\nruncmd"));
+        assert!(!valid_domain("1.2.3.4"));
+        assert!(valid_email("me@example.eu"));
+        assert!(!valid_email("me@example"));
+        assert!(!valid_email("m e@example.eu"));
+        assert!(!valid_email("me\"@example.eu"));
+        assert_eq!(sslip_domain("203.0.113.10"), "203-0-113-10.sslip.io");
+    }
+
+    #[test]
+    fn request_validation_and_debug_hides_token() {
+        let mut r = DeployRequest {
+            provider: "hetzner".into(),
+            mode: DeployMode::Drive,
+            domain: "Cloud.Example.EU.".into(),
+            email: String::new(),
+            api_token: "super-secret".into(),
+            region: None,
+            skip_domain: false,
+        };
+        assert!(r.validate().is_ok());
+        assert_eq!(r.effective_domain().as_deref(), Some("cloud.example.eu"));
+        assert!(!format!("{r:?}").contains("super-secret"));
+        r.domain.clear();
+        assert!(r.validate().is_err());
+        r.skip_domain = true;
+        assert!(r.validate().is_ok());
+        assert_eq!(r.effective_domain(), None);
+        r.provider = "hostkey".into();
+        assert!(r.validate().is_err());
     }
 
     #[test]
