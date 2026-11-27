@@ -1,17 +1,26 @@
+//! The deploy wizard: what to run, which host, domain, then a one-click deploy (hosts with an
+//! automated API client) or a filled-in cloud-init recipe to paste (every other host).
+
 use gloo_net::http::Request;
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use types::{
-    dns_records, DeployAccepted, DeployMode, DeployRequest, JobStatus, Port25, Tier, HOSTS,
+    dns_records, CloudInitRecipe, DeployAccepted, DeployMode, DeployRequest, JobStatus, Port25,
+    Tier, HOSTS,
 };
+use web_sys::RequestMode;
 
 #[derive(Clone, PartialEq)]
 enum Status {
     Idle,
     Submitting,
-    Running(String),
-    Done(String),
+    /// Job status from the server while the provider creates and boots the server.
+    Running(JobStatus),
+    /// The server is up (cloud-init is installing); the browser now waits for HTTPS.
+    Up(JobStatus),
+    /// A recipe to paste, for hosts we do not automate.
+    Recipe(CloudInitRecipe),
     Failed(String),
 }
 
@@ -40,6 +49,34 @@ fn port_class(p: Port25) -> &'static str {
     }
 }
 
+/// Reads `{"error": "..."}` from a failed API reply.
+async fn api_error(resp: gloo_net::http::Response) -> String {
+    let status = resp.status();
+    match resp.json::<serde_json::Value>().await {
+        Ok(v) => v["error"]
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("Server returned {status}.")),
+        Err(_) => format!("Server returned {status}, please try again."),
+    }
+}
+
+/// True once `https://<host>/healthz` answers. A `no-cors` fetch cannot read the reply, but it
+/// only resolves when DNS, TLS and the server all work, which is exactly what we want to know.
+async fn reachable(url: &str) -> bool {
+    Request::get(&format!("{url}/healthz"))
+        .mode(RequestMode::NoCors)
+        .send()
+        .await
+        .is_ok()
+}
+
+fn copy_to_clipboard(text: String) {
+    if let Some(w) = web_sys::window() {
+        let _ = w.navigator().clipboard().write_text(&text);
+    }
+}
+
 #[component]
 pub fn DeployPage() -> impl IntoView {
     let (step, set_step) = signal(1u8);
@@ -61,99 +98,134 @@ pub fn DeployPage() -> impl IntoView {
             .unwrap_or(HOSTS[0])
     };
 
+    let (online, set_online) = signal(false);
+
+    let request = move || DeployRequest {
+        provider: selected().id.to_string(),
+        mode: mode.get(),
+        domain: domain.get(),
+        email: email.get(),
+        api_token: token.get(),
+        region: None,
+        skip_domain: skip_domain.get(),
+    };
+
+    // Watches https://<url>/healthz from the browser until the install finishes.
+    let watch = move |url: String| {
+        spawn_local(async move {
+            for _ in 0..120 {
+                if reachable(&url).await {
+                    set_online.set(true);
+                    return;
+                }
+                TimeoutFuture::new(5000).await;
+            }
+        });
+    };
+
     let submit = move |_| {
         set_error.set(None);
+        set_online.set(false);
         let host = selected();
-
-        if email.get().trim().is_empty() || !email.get().contains('@') {
-            set_error.set(Some("Add a notification email so we can send the login details.".into()));
+        let req = request();
+        if let Err(e) = req.validate() {
+            set_error.set(Some(e));
             return;
         }
-        if !skip_domain.get() && domain.get().trim().is_empty() {
-            set_error.set(Some("Add your domain, or tick “configure it later”.".into()));
-            return;
-        }
-        if host.tier == Tier::Api && token.get().trim().is_empty() {
+        if host.one_click() && req.api_token.trim().is_empty() {
             set_error.set(Some(format!(
-                "{} needs an API token for one-click deploy. Or pick a guided host.",
+                "{} needs an API token for one-click deploy.",
                 host.name
             )));
             return;
         }
-
-        let req = DeployRequest {
-            provider: host.id.to_string(),
-            mode: mode.get(),
-            domain: domain.get(),
-            email: email.get(),
-            api_token: token.get(),
-            region: None,
-            skip_domain: skip_domain.get(),
-        };
-
         set_status.set(Status::Submitting);
 
+        if !host.one_click() {
+            spawn_local(async move {
+                let resp = match Request::post("/api/cloud-init").json(&req) {
+                    Ok(r) => r.send().await,
+                    Err(e) => {
+                        set_status
+                            .set(Status::Failed(format!("Could not encode the request: {e}")));
+                        return;
+                    }
+                };
+                match resp {
+                    Ok(r) if r.ok() => match r.json::<CloudInitRecipe>().await {
+                        Ok(recipe) => set_status.set(Status::Recipe(recipe)),
+                        Err(e) => set_status.set(Status::Failed(format!("Bad response: {e}"))),
+                    },
+                    Ok(r) => set_status.set(Status::Failed(api_error(r).await)),
+                    Err(e) => set_status.set(Status::Failed(format!("Request failed: {e}"))),
+                }
+            });
+            return;
+        }
+
         spawn_local(async move {
-            let sent = Request::post("/api/deploy").json(&req);
-            let response = match sent {
-                Ok(request) => request.send().await,
+            let resp = match Request::post("/api/deploy").json(&req) {
+                Ok(r) => r.send().await,
                 Err(e) => {
-                    set_status.set(Status::Failed(format!("Could not encode request: {e}")));
+                    set_status.set(Status::Failed(format!("Could not encode the request: {e}")));
                     return;
                 }
             };
-
-            let response = match response {
-                Ok(r) => r,
+            let resp = match resp {
+                Ok(r) if r.ok() => r,
+                Ok(r) => {
+                    set_status.set(Status::Failed(api_error(r).await));
+                    return;
+                }
                 Err(e) => {
                     set_status.set(Status::Failed(format!("Request failed: {e}")));
                     return;
                 }
             };
-
-            if !response.ok() {
-                set_status.set(Status::Failed(format!(
-                    "Server returned {} — please try again.",
-                    response.status()
-                )));
-                return;
-            }
-
-            let accepted: DeployAccepted = match response.json().await {
+            let accepted: DeployAccepted = match resp.json().await {
                 Ok(v) => v,
                 Err(e) => {
                     set_status.set(Status::Failed(format!("Bad response: {e}")));
                     return;
                 }
             };
+            // The token is not needed any more; drop it from the page too.
+            set_token.set(String::new());
 
-            let job_id = accepted.job_id.clone();
-            set_status.set(Status::Running("queued".into()));
-
-            // Poll until the backend reports the server is ready.
+            // Poll until the server is up (status "installing") or the job failed.
+            let url = format!("/api/deploy/{}", accepted.job_id);
+            let mut misses = 0;
             loop {
-                TimeoutFuture::new(1500).await;
-                let url = format!("/api/deploy/{job_id}");
-                let Ok(resp) = Request::get(&url).send().await else {
-                    continue;
+                TimeoutFuture::new(2000).await;
+                let job = match Request::get(&url).send().await {
+                    Ok(r) if r.ok() => r.json::<JobStatus>().await.ok(),
+                    _ => None,
                 };
-                let Ok(job) = resp.json::<JobStatus>().await else {
+                let Some(job) = job else {
+                    misses += 1;
+                    if misses > 30 {
+                        set_status.set(Status::Failed(
+                            "Lost track of the deploy. Check your host's console.".into(),
+                        ));
+                        return;
+                    }
                     continue;
                 };
                 match job.status.as_str() {
-                    "done" => {
-                        set_status.set(Status::Done(
-                            job.ip.unwrap_or_else(|| "your server".into()),
-                        ));
-                        break;
+                    "installing" | "done" => {
+                        if let Some(u) = job.url.clone() {
+                            watch(u);
+                        }
+                        set_status.set(Status::Up(job));
+                        return;
                     }
                     "failed" => {
                         set_status.set(Status::Failed(
                             job.detail.unwrap_or_else(|| "Provisioning failed.".into()),
                         ));
-                        break;
+                        return;
                     }
-                    other => set_status.set(Status::Running(other.to_string())),
+                    _ => set_status.set(Status::Running(job)),
                 }
             }
         });
@@ -193,7 +265,7 @@ pub fn DeployPage() -> impl IntoView {
                         on:click=move |_| set_step.set(3)
                     >
                         <span class="n">{move || if step.get() > 3 { "✓" } else { "3" }}</span>
-                        "Domain & mail"
+                        "Domain"
                     </button>
                     <button
                         class=move || step_class(step.get(), 4)
@@ -203,7 +275,7 @@ pub fn DeployPage() -> impl IntoView {
                         "Review & deploy"
                     </button>
                     <div class="stepper-foot tiny muted">
-                        "API tokens are held in memory only, for the duration of the install."
+                        "API tokens stay in memory for the few minutes the server takes to boot, then they are dropped. Nothing is stored."
                     </div>
                 </aside>
 
@@ -319,7 +391,7 @@ pub fn DeployPage() -> impl IntoView {
                                                     </div>
                                                     <div class="row">
                                                         <span class="badge">{h.price_from} " / mo"</span>
-                                                        <span class=tier_class(h.tier)>{h.tier.label()}</span>
+                                                        <span class=tier_class(h.tier)>{h.setup_label()}</span>
                                                     </div>
                                                     <div class="meta">{h.specs}</div>
                                                     <div class="tiny muted">{h.integration}</div>
@@ -337,7 +409,8 @@ pub fn DeployPage() -> impl IntoView {
                                             <span class="ico">"⚠"</span>
                                             <span>
                                                 <b>{host.name}</b> " — " {host.mail_note}
-                                                " We can set up an EU outbound relay instead."
+                                                " Plan on an EU outbound relay at first: "
+                                                <a href="/guide#mail">"how"</a>"."
                                             </span>
                                         </div>
                                     }.into_any()
@@ -356,18 +429,21 @@ pub fn DeployPage() -> impl IntoView {
                         3 => view! {
                             <div class="panel-head">
                                 <div>
-                                    <h2>"Domain, mail and notifications"</h2>
-                                    <p>"Where your cloud will live, and where we send the keys."</p>
+                                    <h2>"Domain and access"</h2>
+                                    <p>"Where your cloud will live."</p>
                                 </div>
                             </div>
                             <div class="form-grid">
                                 <label class="field-label">
                                     "Domain"
-                                    <span class="hint">"e.g. cloud.example.eu — leave empty if you will attach it later"</span>
+                                    <span class="hint">"e.g. cloud.example.eu. You add one DNS record once the server has its IP."</span>
                                     <input
                                         class="field"
                                         type="text"
                                         placeholder="cloud.example.eu"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                        prop:disabled=move || skip_domain.get()
                                         prop:value=move || domain.get()
                                         on:input=move |ev| set_domain.set(event_target_value(&ev))
                                     />
@@ -380,16 +456,16 @@ pub fn DeployPage() -> impl IntoView {
                                         on:change=move |ev| set_skip_domain.set(event_target_checked(&ev))
                                     />
                                     <span>
-                                        "Skip domain / email configuration for now"
+                                        "No domain yet, set it up later"
                                         <span class="tiny muted">
-                                            " Boot on http://<ip>:8080 and attach the domain manually later."
+                                            " You get a free https://<server-ip>.sslip.io address with a real certificate; add your own domain whenever you like."
                                         </span>
                                     </span>
                                 </label>
 
                                 <label class="field-label">
-                                    "Notification email"
-                                    <span class="hint">"We email you when the server is ready — and only then."</span>
+                                    "Email for certificate notices (optional)"
+                                    <span class="hint">"Given to Let's Encrypt only, so they can warn you if a certificate fails to renew."</span>
                                     <input
                                         class="field"
                                         type="email"
@@ -400,16 +476,18 @@ pub fn DeployPage() -> impl IntoView {
                                 </label>
 
                                 {move || {
-                                    if selected().tier == Tier::Api {
+                                    let host = selected();
+                                    if host.one_click() {
                                         view! {
                                             <label class="field-label">
-                                                {move || format!("{} API token", selected().name)}
+                                                {format!("{} API token", host.name)}
                                                 <span class="hint">
-                                                    "Read-only provisioning scope. Held in memory only — never written to disk."
+                                                    "Project › Security › API tokens › Generate, with Read & Write. Used once to create the server, never stored. Delete it afterwards if you like."
                                                 </span>
                                                 <input
                                                     class="field"
                                                     type="password"
+                                                    autocomplete="off"
                                                     placeholder="paste your token"
                                                     prop:value=move || token.get()
                                                     on:input=move |ev| set_token.set(event_target_value(&ev))
@@ -421,8 +499,7 @@ pub fn DeployPage() -> impl IntoView {
                                             <div class="note-box">
                                                 <span class="ico">"ⓘ"</span>
                                                 <span>
-                                                    "Guided host: after ordering, we give you a cloud-init recipe to paste.
-                                                    No API token needed."
+                                                    {format!("{}: you order the server in their panel and paste the recipe we generate in the next step. No API token needed.", host.name)}
                                                 </span>
                                             </div>
                                         }.into_any()
@@ -430,50 +507,18 @@ pub fn DeployPage() -> impl IntoView {
                                 }}
 
                                 {move || {
-                                    if skip_domain.get() {
-                                        view! {
-                                            <div class="note-box warn">
-                                                <span class="ico">"⚠"</span>
-                                                <span>
-                                                    "WebGPU and clipboard in the Craft apps need a secure context (https://).
-                                                    You can add the domain and a 3-line Caddyfile later."
-                                                </span>
-                                            </div>
-                                        }.into_any()
+                                    if skip_domain.get() || domain.get().trim().is_empty() {
+                                        view! { <div></div> }.into_any()
                                     } else {
                                         view! {
                                             <div>
                                                 <div class="spread mt-8">
-                                                    <b class="small">"DNS records to add"</b>
-                                                    <span class="tiny muted">"Your registrar or DNS provider"</span>
+                                                    <b class="small">"DNS records you will add"</b>
+                                                    <span class="tiny muted">"At your registrar or DNS provider"</span>
                                                 </div>
-                                                <div class="table-wrap mt-8">
-                                                    <table class="dns-table">
-                                                        <thead>
-                                                            <tr>
-                                                                <th>"Type"</th>
-                                                                <th>"Name"</th>
-                                                                <th>"Value"</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {dns_records(&domain.get(), mail(), "")
-                                                                .into_iter()
-                                                                .map(|r| {
-                                                                    view! {
-                                                                        <tr>
-                                                                            <td><b>{r.kind}</b></td>
-                                                                            <td><code>{r.name}</code></td>
-                                                                            <td><code>{r.value}</code></td>
-                                                                        </tr>
-                                                                    }
-                                                                })
-                                                                .collect_view()}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
+                                                <DnsTable domain=domain.get() mail=mail() ip=String::new() />
                                                 <div class="tiny muted mt-8">
-                                                    "The real server IP is filled in after provisioning; DKIM appears once Stalwart boots."
+                                                    "The server IP is filled in once the server exists; DKIM appears after Stalwart's first start."
                                                 </div>
                                             </div>
                                         }.into_any()
@@ -491,8 +536,12 @@ pub fn DeployPage() -> impl IntoView {
                         _ => view! {
                             <div class="panel-head">
                                 <div>
-                                    <h2>"Review and deploy"</h2>
-                                    <p>"One last look before we boot your server."</p>
+                                    <h2>{move || if selected().one_click() { "Review and deploy" } else { "Review and get your recipe" }}</h2>
+                                    <p>{move || if selected().one_click() {
+                                        "One last look before we create your server."
+                                    } else {
+                                        "We fill in the cloud-init recipe; you paste it when you order the server."
+                                    }}</p>
                                 </div>
                             </div>
                             <div class="review">
@@ -507,65 +556,117 @@ pub fn DeployPage() -> impl IntoView {
                                     </span>
                                 </div>
                                 <div class="review-row">
-                                    <span class="k">"Domain"</span>
+                                    <span class="k">"Address"</span>
                                     <span class="v">
-                                        {move || if skip_domain.get() {
-                                            "Attach later (http://<ip>:8080)".to_string()
-                                        } else if domain.get().is_empty() {
-                                            "—".to_string()
+                                        {move || if skip_domain.get() || domain.get().trim().is_empty() {
+                                            "https://<server-ip>.sslip.io".to_string()
                                         } else {
-                                            format!("https://{}", domain.get())
+                                            format!("https://{}", domain.get().trim())
                                         }}
                                     </span>
                                 </div>
                                 <div class="review-row">
-                                    <span class="k">"Notification email"</span>
-                                    <span class="v">{move || email.get()}</span>
-                                </div>
-                                <div class="review-row">
                                     <span class="k">"Server size"</span>
                                     <span class="v">
-                                        {move || format!("{} RAM · {} disk", mode.get().ram(), mode.get().disk())}
+                                        {move || format!("{} RAM · {} disk or more", mode.get().ram(), mode.get().disk())}
                                     </span>
                                 </div>
                                 <div class="review-row">
                                     <span class="k">"Setup"</span>
-                                    <span class="v">{move || selected().tier.label()}</span>
+                                    <span class="v">{move || selected().setup_label()}</span>
                                 </div>
                             </div>
 
                             {move || match status.get() {
                                 Status::Idle | Status::Submitting => view! { <div></div> }.into_any(),
-                                Status::Running(s) => view! {
+                                Status::Running(job) => view! {
                                     <div class="status-box mt-20">
                                         <div class="status-line">
                                             <span class="spinner"></span>
-                                            <b>"Provisioning…"</b>
-                                            <span class="muted tiny">{s}</span>
+                                            <b>"Creating your server…"</b>
+                                            <span class="muted tiny">{job.detail.unwrap_or(job.status)}</span>
                                         </div>
                                         <div class="progress indeterminate"><div class="progress-bar"></div></div>
-                                        <div class="tiny muted">
-                                            "Installing Docker, Caddy and the drive. This usually takes 1–3 minutes."
-                                        </div>
+                                        <div class="tiny muted">"This takes about a minute. Keep this page open."</div>
                                     </div>
                                 }.into_any(),
-                                Status::Done(ip) => view! {
-                                    <div class="status-box mt-20">
-                                        <div class="status-line">
-                                            <span class="badge success"><span class="dot"></span>"Server online"</span>
-                                            <span class="tiny muted">{ip}</span>
+                                Status::Up(job) => {
+                                    let url = job.url.clone().unwrap_or_default();
+                                    let ip = job.ip.clone().unwrap_or_default();
+                                    let user = job.admin_user.clone().unwrap_or_else(|| "admin".into());
+                                    let password = job.admin_password.clone().unwrap_or_default();
+                                    let custom = !skip_domain.get() && !domain.get().trim().is_empty();
+                                    let link = url.clone();
+                                    let pw_copy = password.clone();
+                                    view! {
+                                        <div class="status-box mt-20">
+                                            <div class="status-line">
+                                                {move || if online.get() {
+                                                    view! { <span class="badge success"><span class="dot"></span>"Online"</span> }.into_any()
+                                                } else {
+                                                    view! { <span class="spinner"></span> }.into_any()
+                                                }}
+                                                <b>{move || if online.get() { "Your cloud is ready" } else { "Server created, installing artcraftCloud…" }}</b>
+                                                <span class="tiny muted">{ip.clone()}</span>
+                                            </div>
+                                            {move || (!online.get()).then(|| view! {
+                                                <div class="progress indeterminate"><div class="progress-bar"></div></div>
+                                            })}
+                                            <div class="small">
+                                                {move || if online.get() { "Open " } else { "In 2–4 minutes it answers at " }}
+                                                <a href=link.clone() target="_blank" rel="noopener"><b>{link.clone()}</b></a>
+                                            </div>
+                                            <div class="secret-box">
+                                                <div class="spread">
+                                                    <b class="small">"Your admin login, shown only here"</b>
+                                                    <button class="button small" on:click=move |_| copy_to_clipboard(pw_copy.clone())>"Copy password"</button>
+                                                </div>
+                                                <div class="mono">"user: " {user} <br /> "password: " {password}</div>
+                                                <div class="tiny muted">
+                                                    "Save it in your password manager now. It is also on the server in /root/artcraft-admin-password.txt; we keep nothing."
+                                                </div>
+                                            </div>
+                                            {custom.then(|| view! {
+                                                <div>
+                                                    <b class="small">"Add these DNS records now"</b>
+                                                    <DnsTable domain=domain.get_untracked() mail=mail() ip=ip.clone() />
+                                                    <div class="tiny muted mt-8">"HTTPS starts working a few minutes after the A record is live."</div>
+                                                </div>
+                                            })}
+                                            <TipCard />
                                         </div>
-                                        <div class="small">
-                                            "We emailed your login details to "
-                                            <b>{move || email.get()}</b>
-                                            ". Open "
-                                            <a href=move || if skip_domain.get() { "#".to_string() } else { format!("https://{}", domain.get()) }>
-                                                {move || if skip_domain.get() { "your server".to_string() } else { domain.get() }}
-                                            </a>
-                                            " and sign in."
+                                    }.into_any()
+                                }
+                                Status::Recipe(recipe) => {
+                                    let host = selected();
+                                    let yaml = recipe.yaml.clone();
+                                    let address = recipe.url.clone().unwrap_or_else(|| "https://<server-ip>.sslip.io".into());
+                                    view! {
+                                        <div class="status-box mt-20">
+                                            <ol class="recipe-steps small">
+                                                <li>
+                                                    "Order an Ubuntu 24.04 (or Debian 12) x86 server at "
+                                                    <a href=host.url target="_blank" rel="noopener"><b>{host.name}</b></a>
+                                                    {format!(" with at least {} RAM.", mode.get_untracked().ram())}
+                                                </li>
+                                                <li>"Paste the recipe below into the “cloud-init”, “user data” or “recipe” box while ordering."</li>
+                                                <li>{format!("After 3–5 minutes, open {address}. The admin login is in /root/artcraft-admin-password.txt (log in with SSH: cat /root/artcraft-admin-password.txt).")}</li>
+                                            </ol>
+                                            <div class="spread">
+                                                <b class="small">"artcraft-cloud.yaml"</b>
+                                                <button class="button small primary" on:click={
+                                                    let yaml = yaml.clone();
+                                                    move |_| copy_to_clipboard(yaml.clone())
+                                                }>"Copy recipe"</button>
+                                            </div>
+                                            <pre class="recipe">{yaml}</pre>
+                                            <div class="tiny muted">
+                                                "No cloud-init box at your host? On the fresh server, save this as artcraft-cloud.yaml and run: sudo cloud-init single --name write_files --file artcraft-cloud.yaml && sudo bash /opt/artcraft/install.sh"
+                                            </div>
+                                            <TipCard />
                                         </div>
-                                    </div>
-                                }.into_any(),
+                                    }.into_any()
+                                }
                                 Status::Failed(msg) => view! {
                                     <div class="status-box mt-20">
                                         <div class="status-line">
@@ -579,15 +680,17 @@ pub fn DeployPage() -> impl IntoView {
                             {move || error.get().map(|e| view! { <div class="error-text mt-16">{e}</div> })}
 
                             <div class="panel-foot">
-                                <button class="button" on:click=move |_| set_step.set(3)>"← Back"</button>
+                                <button class="button" on:click=move |_| { set_status.set(Status::Idle); set_step.set(3) }>"← Back"</button>
                                 <button
                                     class="button primary"
-                                    disabled=move || matches!(status.get(), Status::Submitting | Status::Running(_))
+                                    disabled=move || matches!(status.get(), Status::Submitting | Status::Running(_) | Status::Up(_))
                                     on:click=submit
                                 >
-                                    {move || match status.get() {
-                                        Status::Done(_) => "Deployed ✓",
-                                        _ => "Deploy my cloud",
+                                    {move || match (status.get(), selected().one_click()) {
+                                        (Status::Up(_), _) => "Deployed ✓",
+                                        (Status::Recipe(_), _) => "Regenerate recipe",
+                                        (_, true) => "Deploy my cloud",
+                                        (_, false) => "Get my recipe",
                                     }}
                                 </button>
                             </div>
@@ -595,6 +698,41 @@ pub fn DeployPage() -> impl IntoView {
                     }}
                 </div>
             </div>
+        </div>
+    }
+}
+
+#[component]
+fn DnsTable(domain: String, mail: bool, ip: String) -> impl IntoView {
+    view! {
+        <div class="table-wrap mt-8">
+            <table class="dns-table">
+                <thead>
+                    <tr><th>"Type"</th><th>"Name"</th><th>"Value"</th></tr>
+                </thead>
+                <tbody>
+                    {dns_records(domain.trim(), mail, &ip)
+                        .into_iter()
+                        .map(|r| view! {
+                            <tr>
+                                <td><b>{r.kind}</b></td>
+                                <td><code>{r.name}</code></td>
+                                <td><code>{r.value}</code></td>
+                            </tr>
+                        })
+                        .collect_view()}
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+#[component]
+fn TipCard() -> impl IntoView {
+    view! {
+        <div class="tip-card">
+            <span>"No fees, ever. If this saved you a weekend, a coffee or a beer keeps it going."</span>
+            <a class="button small" href=site::TIP_URL target="_blank" rel="noopener">"☕ Buy me a coffee"</a>
         </div>
     }
 }

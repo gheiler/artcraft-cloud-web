@@ -1,13 +1,12 @@
+# Build: trunk build --release   (dev: trunk watch, while `cargo run -p server` serves it)
+# The server serves dist/ at /deploy and the shared CSS and images at /assets.
 [build]
 target = "index.html"
 dist = "dist"
+public_url = "/deploy/"
 
-[serve]
-addresses = ["127.0.0.1"]
-port = 8088
-open = false
-
-# Forward /api/* from the dev frontend to the Axum backend on :3000,
-# so the wizard can call the real API during local development.
-[[proxy]]
-backend = "http://127.0.0.1:3000/api"
+# Pinned so trunk uses the binaries the Dockerfile installs; keep wasm_bindgen in step with
+# wasm-bindgen in Cargo.lock.
+[tools]
+wasm_bindgen = "0.2.130"
+wasm_opt = "version_131"

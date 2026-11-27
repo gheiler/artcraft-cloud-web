@@ -1,0 +1,14 @@
+[package]
+name = "site"
+version = "0.1.0"
+edition = "2021"
+description = "Marketing pages for artcraftcloud.com, rendered to static HTML by the server"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+leptos = { version = "0.7" }
+types = { path = "../types" }
+
+[features]
+# Turned on by the server, which renders the pages to HTML strings.
+ssr = ["leptos/ssr"]

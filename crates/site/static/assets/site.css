@@ -455,3 +455,45 @@ table.data .price { font-variant-numeric: tabular-nums; white-space: nowrap; }
   * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
   html { scroll-behavior: auto; }
 }
+
+/* Static mode preview (radio + :has, no script) */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+label.segment { cursor: pointer; text-align: center; user-select: none; }
+input:checked + .segment { background: var(--background-1); color: var(--text-1); box-shadow: var(--drop-shadow-2); }
+input:focus-visible + .segment { box-shadow: var(--focus-ring); }
+.mode-card:has(#mp-mail:checked) .mode-drive,
+.mode-card:has(#mp-drive:checked) .mode-mail { display: none; }
+.segments { position: relative; }
+
+/* Theme toggle icon follows data-theme, so the static HTML needs no script to swap it */
+.theme-toggle .when-dark { display: none; }
+:root[data-theme="dark"] .theme-toggle .when-light { display: none; }
+:root[data-theme="dark"] .theme-toggle .when-dark { display: inline; }
+
+/* Tip pill in the header */
+.tip-pill {
+  display: inline-flex; align-items: center; height: 32px; padding: 0 var(--space-12);
+  border: 1px solid var(--line); border-radius: 999px; color: var(--text-2); text-decoration: none;
+  font-size: 13px; font-weight: var(--weight-semibold); white-space: nowrap;
+}
+.tip-pill:hover { background: var(--hover); color: var(--text-1); }
+@media (max-width: 560px) { .tip-pill { display: none; } }
+
+/* Wizard: login box, recipe and tip card */
+.secret-box { display: grid; gap: var(--space-8); padding: var(--space-12); border: 1px dashed var(--primary); border-radius: var(--radius-12); background: var(--primary-faint); }
+.mono, pre.recipe { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+pre.recipe { max-height: 320px; overflow: auto; margin: 0; padding: var(--space-12); border: 1px solid var(--line); border-radius: var(--radius-12); background: var(--surface-2); white-space: pre; }
+.recipe-steps { margin: 0; padding-left: 1.2em; display: grid; gap: var(--space-8); }
+.tip-card { display: flex; align-items: center; justify-content: space-between; gap: var(--space-12); flex-wrap: wrap; padding: var(--space-12); border-radius: var(--radius-12); background: var(--surface-2); font-size: 14px; }
+.field:disabled { opacity: .55; }
+
+/* Wizard on phones: keep the grid inside the viewport */
+.wizard > *, .panel > *, .status-box > * { min-width: 0; }
+@media (max-width: 960px) {
+  .stepper { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .stepper { padding: var(--space-8); gap: 2px; }
+  .stepper-item { flex-direction: column; justify-content: center; gap: var(--space-4); padding: var(--space-8) 2px; font-size: 11px; line-height: 1.2; text-align: center; min-width: 0; }
+  .choice-top, .provider-top { flex-wrap: wrap; gap: var(--space-4); }
+}
