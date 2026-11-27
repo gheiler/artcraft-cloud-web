@@ -1,0 +1,13 @@
+[build]
+target = "index.html"
+dist = "dist"
+
+[serve]
+addresses = ["127.0.0.1"]
+port = 8088
+open = false
+
+# Forward /api/* from the dev frontend to the Axum backend on :3000,
+# so the wizard can call the real API during local development.
+[[proxy]]
+backend = "http://127.0.0.1:3000/api"

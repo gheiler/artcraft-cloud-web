@@ -1,0 +1,414 @@
+{
+  "schema": 1,
+  "serial": 15,
+  "issued": 1795614588,
+  "expires": 1805982588,
+  "apps": [
+    {
+      "id": "wordcraft",
+      "title": "WordCraft",
+      "publisher": "Storytold",
+      "owner": "storytold",
+      "repo": "wordcraft",
+      "blurb": "Word processor",
+      "icon": {
+        "url": "https://raw.githubusercontent.com/gheiler/artcraft-cloud/main/registry/icons/wordcraft.png",
+        "sha256": "96505c7153c1b8a7e0cf0f90353fae669f4ed9de5524ba50ba99af79003cff43"
+      },
+      "extensions": [
+        "docx",
+        "odt",
+        "rtf",
+        "txt",
+        "md",
+        "markdown"
+      ],
+      "author_query": true,
+      "chrome_query": false,
+      "bridge": true,
+      "default_install": true,
+      "keys": {
+        "openpgp": [
+          "2B76741B414AAD6CD33E631213A005C0B9D7C3ED"
+        ]
+      },
+      "recommended": "0.18.1",
+      "versions": [
+        {
+          "version": "0.18.0",
+          "tag": "v0.18.0",
+          "asset": "wordcraft-web-0.18.0.zip",
+          "sha256": "a444046f649a50779b1b6a1b0db7e24facd906156ceecbcfa53bdbbbc89f0310",
+          "size": 22534993,
+          "signed": "openpgp",
+          "status": "ok"
+        },
+        {
+          "version": "0.18.1",
+          "tag": "v0.18.1",
+          "asset": "wordcraft-web-0.18.1.zip",
+          "sha256": "3daa7c2d1f209a7eeb2527fcefa3fe31e875848fb1970d68f54edae55fe0bc9f",
+          "size": 22536015,
+          "signed": "openpgp",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "gridcraft",
+      "title": "GridCraft",
+      "publisher": "Storytold",
+      "owner": "storytold",
+      "repo": "gridcraft",
+      "blurb": "Spreadsheets",
+      "icon": {
+        "url": "https://raw.githubusercontent.com/gheiler/artcraft-cloud/main/registry/icons/gridcraft.png",
+        "sha256": "01ef35442b8d466b52068fda67ab740309321c8bc813b62b9207dfc4116208e7"
+      },
+      "extensions": [
+        "xlsx"
+      ],
+      "author_query": true,
+      "chrome_query": true,
+      "bridge": true,
+      "default_install": true,
+      "keys": {
+        "openpgp": [
+          "2B76741B414AAD6CD33E631213A005C0B9D7C3ED"
+        ]
+      },
+      "recommended": "0.19.1",
+      "versions": [
+        {
+          "version": "0.19.1",
+          "tag": "v0.19.1",
+          "asset": "gridcraft-web-0.19.1.zip",
+          "sha256": "48c5d1b101befebb3c5ba3b7a14914f01c3207934813ed07dc4251b7ae116a78",
+          "size": 9679862,
+          "signed": "openpgp",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "deckcraft",
+      "title": "DeckCraft",
+      "publisher": "Storytold",
+      "owner": "storytold",
+      "repo": "deckcraft",
+      "blurb": "Presentations",
+      "icon": {
+        "url": "https://raw.githubusercontent.com/gheiler/artcraft-cloud/main/registry/icons/deckcraft.png",
+        "sha256": "1bf98b43bb0b21cb038ce063e71b9922e7f48c10d5b99afd046aa6c30642ca69"
+      },
+      "extensions": [
+        "pptx",
+        "potx",
+        "ppsx",
+        "deckcraft"
+      ],
+      "author_query": true,
+      "chrome_query": false,
+      "bridge": true,
+      "default_install": true,
+      "keys": {
+        "openpgp": [
+          "2B76741B414AAD6CD33E631213A005C0B9D7C3ED"
+        ]
+      },
+      "recommended": "0.18.1",
+      "versions": [
+        {
+          "version": "0.18.1",
+          "tag": "v0.18.1",
+          "asset": "deckcraft-web-0.18.1.zip",
+          "sha256": "3196e537fcfab538aaa2e88584bc74e29bb584459b916ab584ac22fbafe32db5",
+          "size": 11910503,
+          "signed": "openpgp",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "pdfcraft",
+      "title": "PdfCraft",
+      "publisher": "Storytold",
+      "owner": "storytold",
+      "repo": "pdfcraft",
+      "blurb": "PDF editor",
+      "icon": {
+        "url": "https://raw.githubusercontent.com/gheiler/artcraft-cloud/main/registry/icons/pdfcraft.png",
+        "sha256": "1933bbeaea290497facd328e917dafcc433d0c0caa9f1e207aa45ac1e430898c"
+      },
+      "extensions": [
+        "pdf"
+      ],
+      "author_query": true,
+      "chrome_query": false,
+      "bridge": true,
+      "default_install": true,
+      "keys": {
+        "openpgp": [
+          "2B76741B414AAD6CD33E631213A005C0B9D7C3ED"
+        ]
+      },
+      "recommended": "0.22.0",
+      "versions": [
+        {
+          "version": "0.22.0",
+          "tag": "v0.22.0",
+          "asset": "pdfcraft-web-0.22.0.zip",
+          "sha256": "5da6db0d6d0d5ae517e9bb62c39eb57285f8befd81ef6555e9a807ccf5da5954",
+          "size": 37379269,
+          "signed": "openpgp",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "cadcraft",
+      "title": "CADCraft",
+      "publisher": "Storytold",
+      "owner": "storytold",
+      "repo": "cadcraft",
+      "blurb": "Drawings",
+      "icon": {
+        "url": "https://raw.githubusercontent.com/gheiler/artcraft-cloud/main/registry/icons/cadcraft.png",
+        "sha256": "c126ff5030d0a0f3e63f039bae81ca63ba71230da2e6fca54e08df1119ea3443"
+      },
+      "extensions": [
+        "dxf"
+      ],
+      "author_query": false,
+      "chrome_query": false,
+      "bridge": true,
+      "default_install": true,
+      "keys": {
+        "openpgp": [
+          "2B76741B414AAD6CD33E631213A005C0B9D7C3ED"
+        ]
+      },
+      "recommended": "0.20.1",
+      "versions": [
+        {
+          "version": "0.20.1",
+          "tag": "v0.20.1",
+          "asset": "cadcraft-web-0.20.1.zip",
+          "sha256": "300e870c50b66d371055915ba95e3ddbfd4c45431466d5214743b5dcab95a0e1",
+          "size": 11420690,
+          "signed": "openpgp",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "figcraft",
+      "title": "FigCraft",
+      "publisher": "Storytold",
+      "owner": "storytold",
+      "repo": "figcraft",
+      "blurb": "Interface design",
+      "icon": {
+        "url": "https://raw.githubusercontent.com/gheiler/artcraft-cloud/main/registry/icons/figcraft.png",
+        "sha256": "13d5236adb30c2bd4ff3eb7bcb7bb5a70d8de2ef36a81a5ffaf43ea171c7f51b"
+      },
+      "extensions": [
+        "figcraft",
+        "fig"
+      ],
+      "author_query": true,
+      "chrome_query": false,
+      "bridge": true,
+      "default_install": true,
+      "keys": {
+        "openpgp": [
+          "2B76741B414AAD6CD33E631213A005C0B9D7C3ED"
+        ]
+      },
+      "recommended": "0.18.1",
+      "versions": [
+        {
+          "version": "0.18.1",
+          "tag": "v0.18.1",
+          "asset": "figcraft-web-0.18.1.zip",
+          "sha256": "2fbeb93f5022b0a7cc9d8528f1ed7e2b54c94d213ef79e65128aa898c399f02b",
+          "size": 10534024,
+          "signed": "openpgp",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "lightcraft",
+      "title": "LightCraft",
+      "publisher": "Storytold",
+      "owner": "storytold",
+      "repo": "lightcraft",
+      "blurb": "Photo library and raw development",
+      "icon": {
+        "url": "https://raw.githubusercontent.com/gheiler/artcraft-cloud/main/registry/icons/lightcraft.png",
+        "sha256": "a1fc54a714b769fa627eb44b0dcc1230e5fc3643890fd3504811b4c05c4a913a"
+      },
+      "extensions": [
+        "jpg",
+        "jpeg",
+        "png",
+        "webp",
+        "gif",
+        "bmp",
+        "tif",
+        "tiff",
+        "dng"
+      ],
+      "author_query": false,
+      "chrome_query": false,
+      "bridge": true,
+      "default_install": true,
+      "keys": {
+        "openpgp": [
+          "2B76741B414AAD6CD33E631213A005C0B9D7C3ED"
+        ]
+      },
+      "recommended": "0.21.1",
+      "versions": [
+        {
+          "version": "0.21.1",
+          "tag": "v0.21.1",
+          "asset": "lightcraft-web-0.21.1.zip",
+          "sha256": "57147383a46eaab3b0cc036acf9443b221450c6a19f5dc303ae165bb9678b8cb",
+          "size": 74569049,
+          "signed": "openpgp",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "filmcraft",
+      "title": "FilmCraft",
+      "publisher": "Storytold",
+      "owner": "storytold",
+      "repo": "filmcraft",
+      "blurb": "Video editor",
+      "icon": {
+        "url": "https://raw.githubusercontent.com/gheiler/artcraft-cloud/main/registry/icons/filmcraft.png",
+        "sha256": "7ca8adb57a34d1f4bff8c7e976ac5fe73e69a89b4268d15b3b861c7e51c45a74"
+      },
+      "extensions": [
+        "fcproj"
+      ],
+      "author_query": false,
+      "chrome_query": false,
+      "bridge": true,
+      "default_install": true,
+      "keys": {
+        "openpgp": [
+          "2B76741B414AAD6CD33E631213A005C0B9D7C3ED"
+        ]
+      },
+      "recommended": "0.20.1",
+      "versions": [
+        {
+          "version": "0.20.1",
+          "tag": "v0.20.1",
+          "asset": "filmcraft-web-0.20.1.zip",
+          "sha256": "1cf3072e3f3b6535fcd024d6f6ab2a16cf7776345d868037dc630de0ad0dbbb8",
+          "size": 15630847,
+          "signed": "openpgp",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "calendarcraft",
+      "title": "CalendarCraft",
+      "publisher": "Gabriel Heiler",
+      "owner": "gheiler",
+      "repo": "calendarcraft",
+      "blurb": "Calendar",
+      "icon": {
+        "url": "https://raw.githubusercontent.com/gheiler/artcraft-cloud/main/registry/icons/calendarcraft.png",
+        "sha256": "d89605a8438156dd78bccf37a5fe2319d14eced9402528474a7f1df88e6a6380"
+      },
+      "extensions": [
+        "ics",
+        "ical",
+        "ifb"
+      ],
+      "author_query": false,
+      "chrome_query": false,
+      "bridge": true,
+      "default_install": true,
+      "keys": {
+        "ed25519": [
+          "Hv8y6mNjnmRqTlAcnJl1v/jCiRyCVsHUi9/fT1T629E=",
+          "jF5sjrTxNhzH0nffbxO2SXoeITH3UsofUPTEu9IKPEk="
+        ]
+      },
+      "recommended": "0.2.2",
+      "versions": [
+        {
+          "version": "0.2.0",
+          "tag": "v0.2.0",
+          "asset": "calendarcraft-web-0.2.0.zip",
+          "sha256": "d1593248151f220671836e69b8c38dfb04214823a05d33c78dc6d15bab2b6f08",
+          "size": 1508857,
+          "signed": "ed25519",
+          "status": "ok"
+        },
+        {
+          "version": "0.2.1",
+          "tag": "v0.2.1",
+          "asset": "calendarcraft-web-0.2.1.zip",
+          "sha256": "6b5d7580979f80afe728bb81d307ad04c524a6d518989a966054145e10ded490",
+          "size": 1518538,
+          "signed": "ed25519",
+          "status": "ok"
+        },
+        {
+          "version": "0.2.2",
+          "tag": "v0.2.2",
+          "asset": "calendarcraft-web-0.2.2.zip",
+          "sha256": "66a1c3dff2723b776c0baaa59d7a8d650d600f7a2fde2b293f975352bed91159",
+          "size": 1541026,
+          "signed": "ed25519",
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "mailcraft",
+      "title": "MailCraft",
+      "publisher": "UCS Care Group",
+      "owner": "UCS-Care-Group",
+      "repo": "mailcraft",
+      "blurb": "Mail, calendar and contacts",
+      "icon": {
+        "url": "https://raw.githubusercontent.com/gheiler/artcraft-cloud/main/registry/icons/mailcraft.png",
+        "sha256": "dd0e62a27b0066ae5f461d5f829cfa143b49ca6a1b9dc9b47686818edd664bf7"
+      },
+      "extensions": [],
+      "author_query": false,
+      "chrome_query": false,
+      "bridge": false,
+      "default_install": true,
+      "keys": {
+        "ed25519": [
+          "Mu5RF5oJpFhDGfa5wpgznC39tDC8vbUbyNkiAMdluPQ=",
+          "XV6WRgW06/mGhZCHhFVKMIEZDmLevQduZPLSj/UW5zI="
+        ]
+      },
+      "recommended": "0.15.0",
+      "versions": [
+        {
+          "version": "0.15.0",
+          "tag": "v0.15.0",
+          "asset": "mailcraft-web-0.15.0.zip",
+          "sha256": "9c9cf9940700af68183d69ea148b5c2e56279d53d2bdb82608271dcb73f80f84",
+          "size": 14579305,
+          "signed": "ed25519",
+          "status": "ok"
+        }
+      ]
+    }
+  ]
+}
