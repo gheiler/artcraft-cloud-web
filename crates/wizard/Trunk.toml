@@ -4,3 +4,9 @@
 target = "index.html"
 dist = "dist"
 public_url = "/deploy/"
+
+# Pinned so trunk uses the binaries the Dockerfile installs; keep wasm_bindgen in step with
+# wasm-bindgen in Cargo.lock.
+[tools]
+wasm_bindgen = "0.2.130"
+wasm_opt = "version_131"

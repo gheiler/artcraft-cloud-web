@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: fmt, clippy, test, wizard build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -p server -p site -p types --all-targets --locked -- -D warnings
+      - run: cargo clippy -p wizard --target wasm32-unknown-unknown --locked -- -D warnings
+      - run: cargo test -p server -p site -p types --locked
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/trunk
+          key: trunk-tools-${{ hashFiles('crates/wizard/Trunk.toml') }}
+      - name: build the wizard
+        run: |
+          curl -fsSL -o /tmp/trunk.tar.gz https://github.com/trunk-rs/trunk/releases/download/v0.22.2/trunk-x86_64-unknown-linux-musl.tar.gz
+          echo "4a90216d93c553f3d8b7401fce0dee588e0fb1eb1c6a379ebac81fabe820f25b  /tmp/trunk.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/trunk.tar.gz -C /usr/local/bin trunk
+          cd crates/wizard && trunk build --release
+      - name: smoke test
+        run: |
+          cargo build --locked -p server
+          ACW_LISTEN=127.0.0.1:3000 target/debug/artcraft-cloud-web &
+          for i in $(seq 1 30); do curl -fsS localhost:3000/healthz && break; sleep 1; done
+          curl -fsS localhost:3000/ | grep -q "Your European server"
+          curl -fsS localhost:3000/deploy | grep -q "/deploy/wizard-"
+          wasm=$(ls crates/wizard/dist | grep '\.wasm$')
+          curl -fsS -o /dev/null -w '%{content_type}\n' "localhost:3000/deploy/$wasm" | grep -q application/wasm
+
+  image:
+    name: docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: artcraft-cloud-web:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: smoke test
+        run: |
+          docker run -d --name web -p 8080:8080 artcraft-cloud-web:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8080/healthz && break; sleep 1; done
+          curl -fsS localhost:8080/hosts | grep -q "Hetzner"
+          curl -fsS localhost:8080/deploy | grep -q "/deploy/wizard-"
+          docker logs web

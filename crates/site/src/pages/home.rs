@@ -76,8 +76,8 @@ pub fn HomePage() -> impl IntoView {
                         <div class="step-num">"1"</div>
                         <h3>"Pick a European host"</h3>
                         <p>
-                            "Compare seven EU providers by price, jurisdiction and mail policy. Four
-                            can be provisioned with one API token; three use a guided recipe."
+                            "Compare seven EU providers by price, jurisdiction and mail policy. Hetzner
+                            boots with one API token; for the others we fill in a recipe you paste."
                         </p>
                         <div class="step-tags">
                             <span class="badge">"Hetzner"</span>
@@ -361,10 +361,7 @@ fn HostsPreview() -> impl IntoView {
                                             <td class="price">{h.price_from} " / mo"</td>
                                             <td>
                                                 <span class=tier_class>
-                                                    {match h.tier {
-                                                        Tier::Api => "1-click API",
-                                                        Tier::Guided => "Guided recipe",
-                                                    }}
+                                                    {h.setup_label()}
                                                 </span>
                                             </td>
                                             <td class="hide-mobile">

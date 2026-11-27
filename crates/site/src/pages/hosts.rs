@@ -26,8 +26,8 @@ pub fn HostsPage() -> impl IntoView {
                     <h2>"Seven hosts, one recipe"</h2>
                     <p>
                         "We only list providers with EU datacentres. Prices are theirs, excluding
-                        VAT. Four support one-click provisioning with an API token; three use a
-                        guided order plus a cloud-init recipe."
+                        VAT. Hetzner is one click with an API token today, and UpCloud, Scaleway and
+                        Contabo are next; every host works now with an order plus our cloud-init recipe."
                     </p>
                 </div>
 
@@ -58,7 +58,7 @@ pub fn HostsPage() -> impl IntoView {
                                             <td class="muted">{h.datacenters}</td>
                                             <td class="price">{h.price_from} " / mo"</td>
                                             <td class="muted">{h.specs}</td>
-                                            <td><span class=tier_class(h.tier)>{h.tier.label()}</span></td>
+                                            <td><span class=tier_class(h.tier)>{h.setup_label()}</span></td>
                                             <td>
                                                 <span class=port_class(h.port25)>{h.port25.label()}</span>
                                                 <div class="tiny muted">{h.mail_note}</div>

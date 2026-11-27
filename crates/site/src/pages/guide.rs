@@ -17,8 +17,8 @@ pub fn GuidePage() -> impl IntoView {
                 <div class="doc">
                     <nav class="doc-nav">
                         <a href="#prereqs">"1. What you need"</a>
-                        <a href="#compose">"2. Docker Compose"</a>
-                        <a href="#caddy">"3. Caddy + HTTPS"</a>
+                        <a href="#recipe">"2. The cloud-init recipe"</a>
+                        <a href="#compose">"3. By hand: Compose + Caddy"</a>
                         <a href="#dns">"4. DNS records"</a>
                         <a href="#mail">"5. Mail & Port 25"</a>
                         <a href="#backups">"6. Backups"</a>
@@ -33,26 +33,41 @@ pub fn GuidePage() -> impl IntoView {
                             <li>"About 20 GB of disk for Drive-only, 40 GB with mail."</li>
                         </ul>
 
-                        <h2 id="compose">"2. Docker Compose"</h2>
-                        <p>"Install Docker, then write this to " <code>"/opt/artcraft/compose.yaml"</code> ":"</p>
-                        <pre><code>{r#"services:
-  cloud:
-    image: ghcr.io/gheiler/artcraft-cloud:latest
-    restart: always
-    ports:
-      - "8080:8080"
-    volumes:
-      - /opt/artcraft/data:/data
-    environment:
-      - ARTCRAFT_PUBLIC_URL=https://cloud.example.eu
-"#}</code></pre>
-                        <p>"Start it with " <code>"docker compose -f /opt/artcraft/compose.yaml up -d"</code> "."</p>
-
-                        <h2 id="caddy">"3. Caddy + automatic HTTPS"</h2>
+                        <h2 id="recipe">"2. The cloud-init recipe"</h2>
                         <p>
-                            "Caddy gets you a certificate without thinking. Point it at the container:"
+                            "The wizard fills in "
+                            <a href="https://github.com/gheiler/artcraft-cloud/blob/main/deploy/cloud-init/artcraft-cloud.yaml" target="_blank" rel="noopener">
+                                <code>"deploy/cloud-init/artcraft-cloud.yaml"</code>
+                            </a>
+                            " and nothing else. Edit the four values at the top yourself and paste it into your host's
+                            “user data” box when you create the server:"
                         </p>
-                        <pre><code>{r#"cloud.example.eu {
+                        <pre><code>{r#"ARTCRAFT_DOMAIN=cloud.example.eu   # empty: https://<ip>.sslip.io
+ARTCRAFT_ACME_EMAIL=you@example.eu  # optional
+ARTCRAFT_ADMIN_PASSWORD=            # empty: generated
+ARTCRAFT_MAIL=0                     # 1 also starts Stalwart
+"#}</code></pre>
+                        <p>
+                            "It installs Docker, opens 22/80/443 in ufw, runs artcraftCloud behind Caddy with
+                            automatic HTTPS, and writes the admin login to "
+                            <code>"/root/artcraft-admin-password.txt"</code>
+                            ". Watch it with " <code>"tail -f /var/log/artcraft-install.log"</code>
+                            ". Change a value later in " <code>"/opt/artcraft/.env"</code> " and run "
+                            <code>"bash /opt/artcraft/install.sh"</code> " again."
+                        </p>
+
+                        <h2 id="compose">"3. By hand: Docker Compose + Caddy"</h2>
+                        <p>
+                            "Prefer to do it yourself? Use artcraftCloud's "
+                            <a href="https://github.com/gheiler/artcraft-cloud/blob/main/compose.yaml" target="_blank" rel="noopener"><code>"compose.yaml"</code></a>
+                            " and put Caddy in front:"
+                        </p>
+                        <pre><code>{r#"git clone https://github.com/gheiler/artcraft-cloud && cd artcraft-cloud
+    ARTCRAFT_PUBLIC_URL=https://cloud.example.eu \
+ARTCRAFT_ADMIN_PASSWORD='choose-a-long-one' docker compose up -d
+
+# /etc/caddy/Caddyfile
+cloud.example.eu {
     reverse_proxy localhost:8080
 }
 "#}</code></pre>

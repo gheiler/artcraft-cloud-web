@@ -1,46 +1,90 @@
 # artcraftCloud Web
 
-Marketing site + deployment wizard for [artcraftCloud](https://artcraftcloud.com).
+The website for [artcraftCloud](https://github.com/gheiler/artcraft-cloud) at
+[artcraftcloud.com](https://artcraftcloud.com): what it is, the apps, a comparison of European VPS
+hosts, a self-hosting guide, and a deploy wizard that boots your own artcraftCloud.
 
-Rust everywhere: **Axum + SQLite** backend, **Leptos (WASM)** frontend.
+Rust everywhere, one binary: **Axum** serves server-rendered pages and the deploy API, and a small
+**Leptos (Wasm)** app runs only on `/deploy`. Nothing is stored: no database, no accounts, no
+cookies, no analytics. See [plan.md](plan.md) for the product plan.
 
 ## Layout
 
 ```
 crates/
-├── types/    # shared structs (DeployRequest, …) used by server + wizard
-├── server/   # Axum API, provider clients, cloud-init generator
-└── wizard/   # Leptos CSR frontend (Trunk), mounted at /deploy
+├── types/    # shared structs: hosts, DeployRequest, validation, DNS records
+├── site/     # the public pages (/, /apps, /hosts, /guide) as Leptos markup, rendered to HTML
+│   └── static/assets/   # site.css, fonts, app icons, screenshots, apps.json
+├── server/   # Axum: pages, /assets, /deploy, the API, Hetzner client, cloud-init filler
+│   └── templates/artcraft-cloud.yaml   # copy of artcraft-cloud's deploy/cloud-init recipe
+└── wizard/   # Leptos CSR app for /deploy only (built with trunk)
 ```
+
+## How deploying works
+
+1. The visitor picks Drive or Drive + Mail, a host, and a domain (or none: the server then
+   answers at `https://<ip>.sslip.io` with a real certificate).
+2. **One-click (Hetzner today):** they paste a Read & Write API token. The server creates the VM
+   with the filled-in cloud-init recipe, trying cheaper types and other EU locations when Hetzner
+   has no capacity, waits until it runs, and shows the address, DNS records and a generated admin
+   login once. The browser then waits for `https://<domain>/healthz` to answer.
+3. **Every other host:** `/api/cloud-init` returns the same recipe filled in, to paste into the
+   host's "user data" / "cloud-init" box when ordering.
+
+The recipe is the one in artcraft-cloud (`deploy/cloud-init/artcraft-cloud.yaml`), so people who
+install by hand run the same thing. After it changes there, run `scripts/sync-cloud-init.sh`.
+
+**Tokens:** the API token lives only inside the task that creates the server and is dropped when
+it ends; it is never written to disk or logged (`DeployRequest`'s `Debug` redacts it). Jobs, and
+the generated admin password, stay in memory for an hour and are gone on restart.
+
+## API
+
+| Route | |
+| --- | --- |
+| `POST /api/cloud-init` | `DeployRequest` JSON -> `{ yaml, url }` |
+| `POST /api/deploy` | `DeployRequest` JSON with `api_token` -> `{ job_id }` (one-click hosts only) |
+| `GET /api/deploy/{job_id}` | status: `creating`, `booting`, `installing` (server up), `failed` |
+| `GET /healthz` | `ok` |
 
 ## Prerequisites
 
 ```sh
-# one-time
-rustup target add wasm32-unknown-unknown
-rustup component add rustfmt clippy
-cargo install trunk
+# one-time (rust-toolchain.toml installs the wasm target and components on first use)
+cargo install trunk --locked
 ```
 
 ## Run it (development)
 
-You need **two terminals**.
-
-**Terminal 1 — backend (API on http://127.0.0.1:3000):**
-
 ```sh
-cargo run -p server
+# terminal 1: the wizard, rebuilt on every change
+cd crates/wizard && trunk watch
+
+# terminal 2: the site on http://127.0.0.1:3000
+ACW_ALLOW_DEMO=1 cargo run -p server
 ```
 
-**Terminal 2 — frontend (http://127.0.0.1:8080):**
+Pages and CSS are read on each request (CSS from `crates/site/static`), the wizard from
+`crates/wizard/dist`. With `ACW_ALLOW_DEMO=1`, the API token `demo` runs a pretend Hetzner deploy,
+handy for trying the wizard without creating a server.
+
+| Variable | Default | |
+| --- | --- | --- |
+| `ACW_LISTEN` | `127.0.0.1:3000` | address to listen on (`0.0.0.0:8080` in the image) |
+| `ACW_STATIC_DIR` | `crates/site/static` | CSS, fonts and images, served at `/assets` |
+| `ACW_WIZARD_DIR` | `crates/wizard/dist` | the trunk build, served at `/deploy` |
+| `ACW_ALLOW_DEMO` | `0` | `1` enables the `demo` token |
+| `ACW_HETZNER_API` | `https://api.hetzner.cloud/v1` | for tests against a mock |
+| `RUST_LOG` | `info` | log filter |
+
+## Docker
 
 ```sh
-cd crates/wizard
-trunk serve
+docker build -t artcraft-cloud-web .
+docker run -d -p 8080:8080 artcraft-cloud-web
 ```
 
-`trunk serve` proxies `/api/*` to the backend, so the wizard works end to end.
-Open http://127.0.0.1:8080/deploy.
+Put it behind any TLS reverse proxy (Caddy, Traefik). The image runs as non-root on distroless.
 
 ## Debugging for Rust newcomers
 
@@ -72,8 +116,8 @@ RUST_LOG=tower_http=debug,info cargo run -p server
 Logs look like:
 
 ```
-INFO server: listening on http://127.0.0.1:3000
-INFO server: provisioning started job=job-1 provider=hetzner domain=cloud.example.eu
+INFO artcraft_cloud_web: listening on http://127.0.0.1:3000
+INFO server: deploy started job=3f9c… provider=hetzner mode=Drive demo=true
 ```
 
 ### 3. Panics and backtraces
@@ -122,13 +166,16 @@ Network for `/api` calls.
 ### 5. Test the API without a browser
 
 ```sh
-# start a deploy job
+# a filled-in recipe for a guided host
+curl -s -X POST http://127.0.0.1:3000/api/cloud-init \
+  -H 'content-type: application/json' \
+  -d '{"provider":"euronodes","mode":"drive","domain":"cloud.example.eu","email":"me@example.eu"}'
+
+# a pretend one-click deploy (needs ACW_ALLOW_DEMO=1), then poll it with the returned job_id
 curl -s -X POST http://127.0.0.1:3000/api/deploy \
   -H 'content-type: application/json' \
-  -d '{"provider":"hetzner","domain":"cloud.example.eu","email":"me@example.eu","api_token":"fake","region":null}'
-
-# poll its status
-curl -s http://127.0.0.1:3000/api/deploy/job-1
+  -d '{"provider":"hetzner","mode":"drive","domain":"","skip_domain":true,"api_token":"demo"}'
+curl -s http://127.0.0.1:3000/api/deploy/<job_id>
 ```
 
 ### 6. Tests
@@ -138,13 +185,6 @@ cargo test           # unit + integration tests
 cargo test -p types  # one crate only
 ```
 
-## Architecture notes
+## License
 
-- **API tokens are never persisted.** The provider token lives only inside the
-  background task for the duration of provisioning.
-- `/api/deploy` returns immediately with a `job_id`; the client polls
-  `/api/deploy/:id`. This is the hook where SSE progress streaming and the
-  "email me when ready" notification will plug in.
-- The canonical server install lives in
-  `../artcraft-cloud/deploy/cloud-init/artcraft-cloud.yaml` and is shared by
-  the one-click wizard and manual CLI users.
+MIT OR Apache-2.0, like artcraftCloud.

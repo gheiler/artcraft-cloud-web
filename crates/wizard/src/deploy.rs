@@ -6,8 +6,8 @@ use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use types::{
-    dns_records, CloudInitRecipe, DeployAccepted, DeployMode, DeployRequest, Host, JobStatus,
-    Port25, Tier, HOSTS,
+    dns_records, CloudInitRecipe, DeployAccepted, DeployMode, DeployRequest, JobStatus, Port25,
+    Tier, HOSTS,
 };
 use web_sys::RequestMode;
 
@@ -28,16 +28,6 @@ fn tier_class(tier: Tier) -> &'static str {
     match tier {
         Tier::Api => "badge primary",
         Tier::Guided => "badge",
-    }
-}
-
-fn setup_label(h: &Host) -> &'static str {
-    if h.one_click() {
-        "1-click"
-    } else if h.tier == Tier::Api {
-        "Recipe · 1-click soon"
-    } else {
-        "Guided recipe"
     }
 }
 
@@ -401,7 +391,7 @@ pub fn DeployPage() -> impl IntoView {
                                                     </div>
                                                     <div class="row">
                                                         <span class="badge">{h.price_from} " / mo"</span>
-                                                        <span class=tier_class(h.tier)>{setup_label(h)}</span>
+                                                        <span class=tier_class(h.tier)>{h.setup_label()}</span>
                                                     </div>
                                                     <div class="meta">{h.specs}</div>
                                                     <div class="tiny muted">{h.integration}</div>
@@ -583,7 +573,7 @@ pub fn DeployPage() -> impl IntoView {
                                 </div>
                                 <div class="review-row">
                                     <span class="k">"Setup"</span>
-                                    <span class="v">{move || setup_label(&selected())}</span>
+                                    <span class="v">{move || selected().setup_label()}</span>
                                 </div>
                             </div>
 

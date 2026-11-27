@@ -115,6 +115,17 @@ impl Host {
     pub fn one_click(&self) -> bool {
         self.tier == Tier::Api && self.id == "hetzner"
     }
+
+    /// "1-click", "Recipe · 1-click soon" or "Guided recipe".
+    pub fn setup_label(&self) -> &'static str {
+        if self.one_click() {
+            "1-click"
+        } else if self.tier == Tier::Api {
+            "Recipe · 1-click soon"
+        } else {
+            "Guided recipe"
+        }
+    }
 }
 
 /// The v1 line-up. Hostkey is deliberately excluded (see plan.md).
