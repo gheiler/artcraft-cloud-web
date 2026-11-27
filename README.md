@@ -27,12 +27,28 @@ crates/
 2. **One-click (Hetzner today):** they paste a Read & Write API token. The server creates the VM
    with the filled-in cloud-init recipe, trying cheaper types and other EU locations when Hetzner
    has no capacity, waits until it runs, and shows the address, DNS records and a generated admin
-   login once. The browser then waits for `https://<domain>/healthz` to answer.
+   login once. The Verify panel then re-checks DNS and `https://<host>/healthz` until it answers.
 3. **Every other host:** `/api/cloud-init` returns the same recipe filled in, to paste into the
-   host's "user data" / "cloud-init" box when ordering.
+   host's "user data" / "cloud-init" box when ordering. The visitor then enters the server's IP
+   in the Verify panel.
+4. **Verify (`/api/verify`):** checks the A record (and AAAA if any) against the server's IP,
+   with mail also `mail.<domain>`, MX, SPF, DMARC and (given Stalwart's selector) DKIM, then
+   `GET https://<host>/healthz`. Each check says what was found, what was expected and how to fix
+   it; the wizard re-checks every 15 s until everything passes. In sslip.io mode the mail checks
+   are skipped (mail needs a domain).
+
+**Verify safety:** HTTP goes only to the IP the visitor entered, pinned for the TLS name, so a
+domain pointing at internal addresses can't be used to reach them; that IP must be public
+unicast (no private, loopback, link-local, CGNAT, benchmarking, multicast or documentation
+ranges), port 443 only, no redirects or proxies, 6 s timeout, 4 KB read. DNS goes to Cloudflare's
+public resolvers, uncached. Limits: 12 checks a minute per client, 20 a minute per checked
+server, 16 at once. Nothing is stored.
 
 The recipe is the one in artcraft-cloud (`deploy/cloud-init/artcraft-cloud.yaml`), so people who
-install by hand run the same thing. After it changes there, run `scripts/sync-cloud-init.sh`.
+install by hand run the same thing. After it changes there, run `scripts/sync-cloud-init.sh`
+(`--check` only compares; `--ref <branch>` or a local checkout path picks the source). CI runs the
+check against artcraft-cloud `main`: drift fails the build, and while the recipe is not on `main`
+yet (artcraft-cloud PR #7) it only warns.
 
 **Tokens:** the API token lives only inside the task that creates the server and is dropped when
 it ends; it is never written to disk or logged (`DeployRequest`'s `Debug` redacts it). Jobs, and
@@ -45,6 +61,7 @@ the generated admin password, stay in memory for an hour and are gone on restart
 | `POST /api/cloud-init` | `DeployRequest` JSON -> `{ yaml, url }` |
 | `POST /api/deploy` | `DeployRequest` JSON with `api_token` -> `{ job_id }` (one-click hosts only) |
 | `GET /api/deploy/{job_id}` | status: `creating`, `booting`, `installing` (server up), `failed` |
+| `POST /api/verify` | `VerifyRequest` JSON (`domain`, `skip_domain`, `ipv4`, `ipv6`, `mail`, `dkim_selector`) -> `VerifyReport` (`checks[]` with `state` ok/warn/fail/wait/skip, `found`, `expected`, `fix`; `ready`) |
 | `GET /healthz` | `ok` |
 
 ## Prerequisites
@@ -73,7 +90,8 @@ handy for trying the wizard without creating a server.
 | `ACW_LISTEN` | `127.0.0.1:3000` | address to listen on (`0.0.0.0:8080` in the image) |
 | `ACW_STATIC_DIR` | `crates/site/static` | CSS, fonts and images, served at `/assets` |
 | `ACW_WIZARD_DIR` | `crates/wizard/dist` | the trunk build, served at `/deploy` |
-| `ACW_ALLOW_DEMO` | `0` | `1` enables the `demo` token |
+| `ACW_ALLOW_DEMO` | `0` | `1` enables the `demo` token, and canned `/api/verify` answers for documentation IPs (203.0.113.x; a domain containing `ready` passes everything) |
+| `ACW_TRUST_PROXY` | `0` | `1` behind Caddy: rate-limit by the last `X-Forwarded-For` entry |
 | `ACW_HETZNER_API` | `https://api.hetzner.cloud/v1` | for tests against a mock |
 | `RUST_LOG` | `info` | log filter |
 

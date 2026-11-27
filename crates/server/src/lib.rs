@@ -4,8 +4,11 @@
 pub mod cloud_init;
 pub mod jobs;
 pub mod providers;
+pub mod verify;
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{
@@ -34,8 +37,12 @@ pub struct Config {
     pub wizard_dir: PathBuf,
     /// Base URL of the Hetzner API (a mock in tests).
     pub hetzner_api: String,
-    /// When true, the API token `demo` runs a simulated deploy (for screenshots and local work).
+    /// When true, the API token `demo` runs a simulated deploy (for screenshots and local work),
+    /// and `/api/verify` answers documentation IPs (203.0.113.0/24, …) with canned results.
     pub allow_demo: bool,
+    /// Behind a reverse proxy (Caddy): take the client address for rate limits from the last
+    /// `X-Forwarded-For` entry instead of the TCP peer.
+    pub trust_proxy: bool,
 }
 
 impl Config {
@@ -46,6 +53,7 @@ impl Config {
             wizard_dir: env("ACW_WIZARD_DIR", "crates/wizard/dist").into(),
             hetzner_api: env("ACW_HETZNER_API", providers::hetzner::API),
             allow_demo: env("ACW_ALLOW_DEMO", "0") == "1",
+            trust_proxy: env("ACW_TRUST_PROXY", "0") == "1",
         }
     }
 }
@@ -54,12 +62,16 @@ impl Config {
 pub struct AppState {
     pub config: Config,
     pub jobs: Jobs,
+    pub dns: Arc<verify::PublicDns>,
+    pub limits: Arc<verify::Limits>,
 }
 
 pub fn app(config: Config) -> Router {
     let state = AppState {
         config: config.clone(),
         jobs: Jobs::default(),
+        dns: Arc::new(verify::PublicDns::default()),
+        limits: Arc::new(verify::Limits::default()),
     };
     let assets = Router::new()
         .fallback_service(ServeDir::new(config.static_dir.join("assets")))
@@ -84,6 +96,7 @@ pub fn app(config: Config) -> Router {
         .route("/api/cloud-init", post(cloud_init_recipe))
         .route("/api/deploy", post(deploy))
         .route("/api/deploy/{id}", get(job_status))
+        .route("/api/verify", post(verify_server))
         .fallback(not_found)
         .layer(CompressionLayer::new())
         .layer(SetResponseHeaderLayer::if_not_present(
@@ -311,8 +324,8 @@ async fn run_hetzner(
         s.ip = server.ipv4.clone();
     });
 
-    // Wait for "running" (usually under a minute). Cloud-init then installs in 2–4 minutes; the
-    // wizard watches https://<domain>/healthz from the browser for that part.
+    // Wait for "running" (usually under a minute). Cloud-init then installs in 5–10 minutes; the
+    // wizard polls /api/verify (DNS + https://<host>/healthz) for that part.
     let mut ip = server.ipv4.clone();
     let mut running = false;
     for _ in 0..60 {
@@ -367,7 +380,9 @@ fn finish(jobs: &Jobs, id: &str, req: &DeployRequest, ip: &str, password: String
     let domain = req.effective_domain().unwrap_or_else(|| sslip_domain(ip));
     jobs.update(id, |s| {
         s.status = "installing".into();
-        s.detail = Some("The server is up and installing artcraftCloud (2–4 minutes)".into());
+        s.detail = Some(
+            "The server is up and installing artcraftCloud (5–10 minutes on first start)".into(),
+        );
         s.ip = Some(ip.to_string());
         s.url = Some(format!("https://{domain}"));
         s.admin_user = Some("admin".into());
@@ -385,6 +400,79 @@ async fn job_status(State(state): State<AppState>, Path(id): Path<String>) -> Re
         )
             .into_response(),
     }
+}
+
+/// The address rate limits are counted against.
+fn client_ip(req: &axum::extract::Request, trust_proxy: bool) -> String {
+    if trust_proxy {
+        if let Some(last) = req
+            .headers()
+            .get_all("x-forwarded-for")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(|v| v.split(','))
+            .map(str::trim)
+            .rfind(|v| !v.is_empty())
+        {
+            return last.to_string();
+        }
+    }
+    req.extensions()
+        .get::<axum::extract::ConnectInfo<SocketAddr>>()
+        .map(|c| c.0.ip().to_string())
+        .unwrap_or_else(|| "local".into())
+}
+
+fn too_many(msg: &str) -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [(header::RETRY_AFTER, "60")],
+        Json(serde_json::json!({ "error": msg })),
+    )
+        .into_response()
+}
+
+/// POST /api/verify: DNS records and `https://<host>/healthz` for a new server (see `verify.rs`).
+async fn verify_server(State(state): State<AppState>, req: axum::extract::Request) -> Response {
+    let client = client_ip(&req, state.config.trust_proxy);
+    if !state
+        .limits
+        .hit(&format!("c:{client}"), state.limits.per_client_per_minute)
+    {
+        return too_many("Too many checks from your address. Wait a minute and try again.");
+    }
+    let body = match axum::body::to_bytes(req.into_body(), 4096).await {
+        Ok(b) => b,
+        Err(_) => return bad_request("Request too large."),
+    };
+    let Ok(vr) = serde_json::from_slice::<types::VerifyRequest>(&body) else {
+        return bad_request("Expected a JSON verify request.");
+    };
+    let target = match verify::Target::parse(&vr, state.config.allow_demo) {
+        Ok(t) => t,
+        Err(e) => return bad_request(e),
+    };
+    if !state.limits.hit(
+        &format!("t:{}", target.ipv4),
+        state.limits.per_target_per_minute,
+    ) {
+        return too_many(
+            "This server was checked a lot in the last minute. Wait a minute and try again.",
+        );
+    }
+    let Ok(_permit) = state.limits.concurrent.try_acquire() else {
+        return too_many("Lots of checks running right now. Try again in a few seconds.");
+    };
+    let demo = state.config.allow_demo && target.ipv4.is_documentation();
+    let report = if demo {
+        let (dns, probe) = verify::demo(&target);
+        verify::verify(&dns, &probe, &target).await
+    } else {
+        let probe = verify::HttpProbe::default();
+        verify::verify(state.dns.as_ref(), &probe, &target).await
+    };
+    tracing::info!(host = %report.host, ready = report.ready, demo, "verify");
+    ([(header::CACHE_CONTROL, "no-store")], Json(report)).into_response()
 }
 
 #[cfg(test)]

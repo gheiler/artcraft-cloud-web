@@ -9,7 +9,8 @@ use types::{
     dns_records, CloudInitRecipe, DeployAccepted, DeployMode, DeployRequest, JobStatus, Port25,
     Tier, HOSTS,
 };
-use web_sys::RequestMode;
+
+use crate::verify::VerifyPanel;
 
 #[derive(Clone, PartialEq)]
 enum Status {
@@ -61,16 +62,6 @@ async fn api_error(resp: gloo_net::http::Response) -> String {
     }
 }
 
-/// True once `https://<host>/healthz` answers. A `no-cors` fetch cannot read the reply, but it
-/// only resolves when DNS, TLS and the server all work, which is exactly what we want to know.
-async fn reachable(url: &str) -> bool {
-    Request::get(&format!("{url}/healthz"))
-        .mode(RequestMode::NoCors)
-        .send()
-        .await
-        .is_ok()
-}
-
 fn copy_to_clipboard(text: String) {
     if let Some(w) = web_sys::window() {
         let _ = w.navigator().clipboard().write_text(&text);
@@ -108,19 +99,6 @@ pub fn DeployPage() -> impl IntoView {
         api_token: token.get(),
         region: None,
         skip_domain: skip_domain.get(),
-    };
-
-    // Watches https://<url>/healthz from the browser until the install finishes.
-    let watch = move |url: String| {
-        spawn_local(async move {
-            for _ in 0..120 {
-                if reachable(&url).await {
-                    set_online.set(true);
-                    return;
-                }
-                TimeoutFuture::new(5000).await;
-            }
-        });
     };
 
     let submit = move |_| {
@@ -213,9 +191,7 @@ pub fn DeployPage() -> impl IntoView {
                 };
                 match job.status.as_str() {
                     "installing" | "done" => {
-                        if let Some(u) = job.url.clone() {
-                            watch(u);
-                        }
+                        // The verify panel in the "Up" view takes over from here.
                         set_status.set(Status::Up(job));
                         return;
                     }
@@ -237,7 +213,7 @@ pub fn DeployPage() -> impl IntoView {
         <div class="container">
             <div class="wizard-head">
                 <span class="kicker">"Deploy"</span>
-                <h1>"Your own cloud, in about two minutes"</h1>
+                <h1>"Your own cloud in about ten minutes"</h1>
                 <p>
                     "Pick what to run, choose an EU host, and we generate the exact cloud-init
                     recipe for it. No account, no fee — you pay the host directly."
@@ -272,7 +248,7 @@ pub fn DeployPage() -> impl IntoView {
                         on:click=move |_| set_step.set(4)
                     >
                         <span class="n">"4"</span>
-                        "Review & deploy"
+                        "Deploy & verify"
                     </button>
                     <div class="stepper-foot tiny muted">
                         "API tokens stay in memory for the few minutes the server takes to boot, then they are dropped. Nothing is stored."
@@ -613,7 +589,7 @@ pub fn DeployPage() -> impl IntoView {
                                                 <div class="progress indeterminate"><div class="progress-bar"></div></div>
                                             })}
                                             <div class="small">
-                                                {move || if online.get() { "Open " } else { "In 2–4 minutes it answers at " }}
+                                                {move || if online.get() { "Open " } else { "In 5–10 minutes (the first start downloads the apps) it answers at " }}
                                                 <a href=link.clone() target="_blank" rel="noopener"><b>{link.clone()}</b></a>
                                             </div>
                                             <div class="secret-box">
@@ -633,6 +609,13 @@ pub fn DeployPage() -> impl IntoView {
                                                     <div class="tiny muted mt-8">"HTTPS starts working a few minutes after the A record is live."</div>
                                                 </div>
                                             })}
+                                            <VerifyPanel
+                                                domain=domain.get_untracked()
+                                                skip_domain=skip_domain.get_untracked()
+                                                mail=mail()
+                                                ip=ip.clone()
+                                                on_online=Callback::new(move |_| set_online.set(true))
+                                            />
                                             <TipCard />
                                         </div>
                                     }.into_any()
@@ -650,7 +633,7 @@ pub fn DeployPage() -> impl IntoView {
                                                     {format!(" with at least {} RAM.", mode.get_untracked().ram())}
                                                 </li>
                                                 <li>"Paste the recipe below into the “cloud-init”, “user data” or “recipe” box while ordering."</li>
-                                                <li>{format!("After 3–5 minutes, open {address}. The admin login is in /root/artcraft-admin-password.txt (log in with SSH: cat /root/artcraft-admin-password.txt).")}</li>
+                                                <li>{format!("The first start takes 5–10 minutes. Enter the server's IP below to watch DNS and HTTPS; then open {address}. The admin login is in /root/artcraft-admin-password.txt (log in with SSH: cat /root/artcraft-admin-password.txt).")}</li>
                                             </ol>
                                             <div class="spread">
                                                 <b class="small">"artcraft-cloud.yaml"</b>
@@ -663,6 +646,11 @@ pub fn DeployPage() -> impl IntoView {
                                             <div class="tiny muted">
                                                 "No cloud-init box at your host? On the fresh server, save this as artcraft-cloud.yaml and run: sudo cloud-init single --name write_files --file artcraft-cloud.yaml && sudo bash /opt/artcraft/install.sh"
                                             </div>
+                                            <VerifyPanel
+                                                domain=domain.get_untracked()
+                                                skip_domain=skip_domain.get_untracked()
+                                                mail=mail()
+                                            />
                                             <TipCard />
                                         </div>
                                     }.into_any()
